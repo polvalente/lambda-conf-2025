@@ -1,6 +1,9 @@
 @import "reveal.js/dist/reveal.css";
 @import "reveal.js/dist/theme/white.css";
 @import "highlight.js/styles/github.css";
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
 
 /* Custom styles from original index.html */
 .reveal .slide-number {

@@ -1,0 +1,256 @@
+# Lambda Conf
+
+```elixir
+Mix.install [
+  :exla,
+  :kino,
+  :axon,
+  :explorer,
+  :kino_explorer,
+  {:phoenix_playground, "~> 0.1.6"}
+]
+
+Nx.Defn.default_options(compiler: EXLA)
+Nx.global_default_backend(EXLA.Backend)
+```
+
+## Nx Defn Example
+
+```elixir
+defmodule NxSample do
+  import Nx.Defn
+
+  defn my_first_defn(x, y) do
+    c = Nx.cos(x)
+    s = Nx.sin(y)
+    
+    z1 = c + s
+    z2 = c - s
+
+    {z1, z2, c, s}
+  end
+end
+```
+
+```elixir
+{
+  NxSample.my_first_defn(0.0, 0.0),
+  NxSample.my_first_defn(Nx.tensor([0, :math.pi / 2, :math.pi]), :math.pi / 2)
+} 
+```
+
+```elixir
+Nx.Defn.debug_expr(&NxSample.my_first_defn/2).(0.0, 0.0)
+```
+
+```elixir
+grad = fn x, y -> 
+  Nx.Defn.grad({x, y}, fn {arg0, arg1} -> 
+    {z1, _z2, _c, _s} = NxSample.my_first_defn(arg0, arg1) 
+    Nx.sum(z1)
+  end)
+end
+
+# z1 = cos(x) + sin(y)
+# grad of z1 over x => -sin(x)
+# grad of z1 over y => cos(y)
+Nx.Defn.debug_expr(grad).(0, 0)
+```
+
+## Training a simple Neural Network with Axon
+
+```elixir
+defmodule DataGenerator do
+  def generate(size, seed) do
+    {data, _key} = 
+      Enum.map_reduce(1..size, Nx.Random.key(seed), fn _, key -> 
+        # 0, 2 because the interval is closed at 0 and open at 2
+        {xs, key} = Nx.Random.randint(key, 0, 2, shape: {2, 1}, type: :u8)
+
+        inputs = %{"x" => xs[0..0], "y" => xs[1..1]}
+        out = Nx.logical_xor(inputs["x"], inputs["y"])
+  
+        {{inputs, out}, key}
+      end)
+
+    data
+  end
+end
+```
+
+```elixir
+data = DataGenerator.generate(1000, 42)
+```
+
+### Defining the model
+
+```elixir
+x_input = Axon.input("x", shape: {nil, 1})
+y_input = Axon.input("y", shape: {nil, 1})
+
+model = 
+  [x_input, y_input]
+  |> Axon.concatenate()
+  |> Axon.dense(20, activation: :relu)
+  |> Axon.dense(20, activation: :relu)
+  |> Axon.dense(1, activation: :sigmoid)
+```
+
+```elixir
+Axon.Display.as_graph(model, %{"x" => Nx.template({10, 1}, :u8), "y" => Nx.template({10, 1}, :u8)}, direction: :left_right)
+```
+
+### Running the training loop
+
+```elixir
+epochs = 10
+
+model_state =
+  model
+  |> Axon.Loop.trainer(:binary_cross_entropy, :sgd)
+  |> Axon.Loop.run(data, Axon.ModelState.empty(), epochs: epochs)
+```
+
+### Inference time!
+
+```elixir
+inputs = %{
+  "x" => Nx.u8([0, 0, 1, 1]) |> Nx.reshape({4, 1}),
+  "y" => Nx.u8([0, 1, 0, 1]) |> Nx.reshape({4, 1})
+}
+
+pred = Axon.predict(model, model_state, inputs)
+
+actual = Nx.u8([0, 1, 1, 0]) |> Nx.reshape({4, 1})
+
+Explorer.DataFrame.new(%{
+  "Predicted" => pred,
+  "Predicted (threshold)" => Nx.greater(pred, 0.5),
+  "Expected" => actual
+})
+
+{_init_fn, predict_fn} = Axon.build(model)
+```
+
+```elixir
+serving =
+  {Nx.Serving,
+   serving:
+     Nx.Serving.new(fn _ ->
+       fn batch ->
+         input = Nx.Defn.jit_apply(&Function.identity/1, [batch])
+         x = input[[.., 0..0]]
+         y = input[[.., 1..1]]
+         predict_fn.(model_state, %{"x" => x, "y" => y}) |> Nx.greater_equal(0.5)
+       end
+     end),
+   name: MyServing,
+   batch_size: 10,
+   batch_timeout: 100}
+
+Supervisor.start_link([serving], name: MySupervisor, strategy: :one_for_one)
+```
+
+## Using the trained model on a LiveView
+
+```elixir
+defmodule DemoLive do
+  use Phoenix.LiveView
+
+  def mount(_params, _session, socket) do
+    {:ok, assign(socket, x: false, y: false, result: 0)}
+  end
+
+  def render(assigns) do
+    ~H"""
+    <style>
+    /* Container for each checkbox and its label */
+    .custom-checkbox-container {
+        display: flex;
+        align-items: center; /* Vertically align items */
+        margin-bottom: 10px; /* Add some space between checkbox rows */
+    }
+
+    /* Hide the default checkbox */
+    .custom-checkbox-container input[type="checkbox"] {
+        opacity: 0;
+        position: absolute;
+        width: 0;
+        height: 0;
+    }
+
+    /* Style the label to look like a checkbox */
+    .custom-checkbox-container label {
+        cursor: pointer;
+        display: flex; /* Align label text and custom checkbox */
+        align-items: center;
+    }
+
+    /* Create the custom checkbox appearance */
+    .custom-checkbox-container label::before {
+        content: '';
+        display: inline-block;
+        width: 1.5em;  /*Larger width */
+        height: 1.5em; /* Larger height */
+        border: 2px solid #333;
+        border-radius: 4px;
+        margin-right: 0.5em; /* Space between custom checkbox and label text */
+        line-height: 1.5em; /* Vertically center content if it were text */
+        text-align: center;
+        font-weight: bold;
+        font-size: 1.2em; /* Make the icon inside larger */
+        color: #333;
+        transition: background-color 0.2s, border-color 0.2s; /* Smooth transition */
+    }
+
+    /* Style for when the checkbox is checked - show 'X' */
+    .custom-checkbox-container input[type="checkbox"]:checked + label::before {
+        content: '✖'; /* Unicode 'X' character */
+        background-color: #eee; /* Optional: change background */
+        border-color: #555;
+    }
+
+    /* Style for when the checkbox is NOT checked (optional, if you want a default checkmark or something else) */
+    /* If you want it to be blank by default and only show 'X' when checked, you can remove this block */
+    /* Or, if you want a checkmark when unchecked, you could do:
+    .custom-checkbox-container input[type="checkbox"]:not(:checked) + label::before {
+        content: '✔'; // Unicode checkmark
+    }
+    */
+
+    /* Optional: Focus style for accessibility */
+    .custom-checkbox-container input[type="checkbox"]:focus + label::before {
+        outline: 2px solid dodgerblue;
+        outline-offset: 2px;
+    }
+    </style>
+    <div style="font-size: 3rem; display: flex; flex-direction: column; width: 100%; padding-left: 33%; padding-top: 10%">
+      <div class="custom-checkbox-container" phx-click="toggle-key" phx-value-key="x">
+        <input type="checkbox" id="x" name="x" checked={@x} />
+        <label for="x">X:</label>
+      </div>
+      <div class="custom-checkbox-container" phx-click="toggle-key" phx-value-key="y">
+        <input type="checkbox" id="y" name="y" checked={@y} />
+        <label for="y">Y:</label>
+      </div>
+      <span>
+        {@x} XOR {@y} = {@result}
+      </span>
+    </div>
+    """
+  end
+
+  def handle_event("toggle-key", %{"key" => key}, socket) do
+    key = String.to_existing_atom(key)
+    socket = assign(socket, key, !socket.assigns[key])
+    input = Nx.u8([socket.assigns.x, socket.assigns.y])
+    result = Nx.Serving.batched_run(MyServing, Nx.Batch.stack([input]))
+    socket = assign(socket, :result, Nx.to_number(Nx.reshape(result, {})))
+    {:noreply, socket}
+  end
+end
+```
+
+```elixir
+PhoenixPlayground.start(live: DemoLive, port: 4001)
+```

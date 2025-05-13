@@ -2,13 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Presentation</title>
-    <link phx-track-static rel="stylesheet" href={~p"/assets/css/presentation.css"} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <.live_title default="NxDemo" suffix=" · Phoenix Framework">
+      {assigns[:page_title]}
+    </.live_title>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script defer phx-track-static type="text/javascript" src={~p"/assets/js/presentation.js"}></script>
+    <link phx-track-static rel="stylesheet" href={~p"/assets/css/presentation.css"} />
   </head>
   <body>
     {@inner_content}
-    <script defer phx-track-static type="text/javascript" src={~p"/assets/js/presentation.js"}></script>
   </body>
 </html>

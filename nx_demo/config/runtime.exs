@@ -20,6 +20,8 @@ if System.get_env("PHX_SERVER") do
   config :nx_demo, NxDemoWeb.Endpoint, server: true
 end
 
+config :nx_demo, livebook_session_url: System.fetch_env!("LIVEBOOK_SESSION_URL")
+
 if config_env() == :prod do
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

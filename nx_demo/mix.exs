@@ -53,7 +53,10 @@ defmodule NxDemo.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.1.1"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:reverse_proxy_plug, "~> 3.0"},
+      {:tesla, "~> 1.5"},
+      {:hackney, "~> 1.13"}
     ]
   end
 
